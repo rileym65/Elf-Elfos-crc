@@ -1,0 +1,202 @@
+; *******************************************************************
+; *** This software is copyright 2004 by Michael H Riley          ***
+; *** You have permission to use, modify, copy, and distribute    ***
+; *** this software so long as this copyright notice is retained. ***
+; *** This software may not be used in commercial applications    ***
+; *** without express written permission from the author.         ***
+; *******************************************************************
+
+include    bios.inc
+include    kernel.inc
+
+           org     8000h
+           lbr     0ff00h
+           db      'crc',0
+           dw      9000h
+           dw      endrom+7000h
+           dw      2000h
+           dw      endrom-2000h
+           dw      2000h
+           db      0
+ 
+           org     2000h
+           br      start
+
+include    date.inc
+include    build.inc
+           db      'Written by Michael H. Riley',0
+
+start:
+           lda     ra                  ; move past any spaces
+           smi     ' '
+           lbz     start
+           dec     ra                  ; move back to non-space character
+           ghi     ra                  ; copy argument address to rf
+           phi     rf
+           glo     ra
+           plo     rf
+loop1:     lda     rf                  ; look for first less <= space
+           smi     33
+           bdf     loop1
+           dec     rf                  ; backup to char
+           ldi     0                   ; need proper termination
+           str     rf
+           ghi     ra                  ; back to beginning of name
+           phi     rf
+           glo     ra
+           plo     rf
+           ldn     rf                  ; get byte from argument
+           lbnz    good                ; jump if filename given
+           sep     scall               ; otherwise display usage message
+           dw      f_inmsg
+           db      'Usage: crc filename',10,13,0
+           sep     sret                ; and return to os
+
+good:      ldi     high fildes         ; get file descriptor
+           phi     rd
+           ldi     low fildes
+           plo     rd
+           ldi     0                   ; flags for open
+           plo     r7
+           sep     scall               ; attempt to open file
+           dw      o_open
+           bnf     opened              ; jump if file was opened
+           ldi     high errmsg         ; get error message
+           phi     rf
+           ldi     low errmsg
+           plo     rf
+           sep     scall               ; display it
+           dw      o_msg
+           lbr     o_wrmboot           ; and return to os
+opened:    ldi     0                   ; set initial crc
+           plo     r7
+           phi     r7
+loop:      push    rd                  ; save file descriptor
+           push    r7                  ; save crc
+           mov     rf,data             ; point to kernel data
+           mov     rc,128              ; 128 bytes to read
+           sep     scall               ; read file
+           dw      o_read
+           pop     r7
+           pop     rd
+           glo     rc
+           lbz     done
+           lbnf    success             ; jump if read was good
+done:      sep     scall               ; close the file
+           dw      o_close
+           mov     rd,r7               ; move crc
+           mov     rf,data             ; point to buffer
+           sep     scall               ; convert to ASCII
+           dw      f_hexout4
+           ldi     0                   ; need a terminator
+           str     rf
+           mov     rf,data             ; display result
+           sep     scall
+           dw      f_msg
+           sep     scall               ; cr/lf
+           dw      f_inmsg
+           db      10,13,0
+           lbr     o_wrmboot           ; return to os
+
+success:   mov     rf,data             ; point to data
+           sep     scall               ; perform crc calculation
+           dw      crc
+           lbr     loop                ; loop back for more data
+
+
+; ****************************
+; *** CRC calculation      ***
+; *** R7 - 16-bit crc      ***
+; *** RF - Pointer to data ***
+; *** RC - count           ***
+; ****   R8.0 - C          ***
+; ***    R8.1 - Q          ***
+; ****************************
+crc:       lda     rf                  ; get next byte
+           plo     r8                  ; save it
+           str     r2                  ; store for xor
+           glo     r7                  ; need to xor crc value with c
+           xor
+           ani     0fh                 ; keep only low nybble
+           phi     r8                  ; keep it
+           sep     scall               ; need to shift crc 4 bits
+           dw      shift
+           sep     scall               ; combine with poly
+           dw      poly
+           glo     r8                  ; get C
+           shr                         ; want only hight nybble in low position
+           shr
+           shr
+           shr
+           str     r2                  ; store it
+           glo     r7                  ; need low byte of crc
+           xor                         ; xor it
+           ani     0fh                 ; keep only low nybble
+           phi     r8                  ; store in Q
+           sep     scall               ; need to shift crc 4 bits
+           dw      shift
+           sep     scall               ; combine with poly
+           dw      poly
+           dec     rc                  ; decrement count
+           glo     rc                  ; see if done
+           lbnz    crc                 ; loop back if not
+           ghi     rc                  ; check high byte
+           lbnz    crc                 ; loop back if more to do
+           sep     sret                ; otherwise return to caller
+
+poly:      ghi     r8                  ; get Q
+           str     r2                  ; save a copy
+           shr                         ; shift low bit into df
+           ldi     0                   ; need 0
+           shrc                        ; shift high bit in
+           add                         ; then add in q, now have low byte
+           str     r2                  ; store for xor
+           glo     r7                  ; get low byte of crc
+           xor                         ; xor with poly
+           plo     r7                  ; and put it back
+           ghi     r8                  ; get Q
+           shr                         ; keep only high 3 bits 
+           str     r2                  ; store for later
+           ghi     r8                  ; recover Q
+           shl                         ; shift to high nybble
+           shl
+           shl
+           shl
+           add                         ; add in first part
+           str     r2                  ; store for xor
+           ghi     r7                  ; byte from crc
+           xor
+           phi     r7                  ; put it back
+           sep     sret                ; return to caller
+
+shift:     ldi     4                   ; shift crc right 4 bits
+           plo     re
+crc1:      ghi     r7                  ; shift crc value
+           shr
+           phi     r7
+           glo     r7
+           shrc
+           plo     r7
+           dec     re                  ; decrement count
+           glo     re                  ; get count
+           lbnz    crc1                ; loop until done
+           sep     sret                ; return
+
+filename:  db      0,0
+errmsg:    db      'File not found',10,13,0
+fildes:    db      0,0,0,0
+           dw      dta
+           db      0,0
+           db      0
+           db      0,0,0,0
+           dw      0,0
+           db      0,0,0,0
+
+endrom:    equ     $
+
+buffer:    ds      20
+cbuffer:   ds      80
+dta:       ds      512
+
+data:      ds      128
+
