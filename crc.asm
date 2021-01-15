@@ -48,7 +48,7 @@ loop1:     lda     rf                  ; look for first less <= space
            ldn     rf                  ; get byte from argument
            lbnz    good                ; jump if filename given
            sep     scall               ; otherwise display usage message
-           dw      f_inmsg
+           dw      o_inmsg
            db      'Usage: crc filename',10,13,0
            sep     sret                ; and return to os
 
@@ -92,9 +92,9 @@ done:      sep     scall               ; close the file
            str     rf
            mov     rf,data             ; display result
            sep     scall
-           dw      f_msg
+           dw      o_msg
            sep     scall               ; cr/lf
-           dw      f_inmsg
+           dw      o_inmsg
            db      10,13,0
            lbr     o_wrmboot           ; return to os
 
