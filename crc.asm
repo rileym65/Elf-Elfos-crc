@@ -6,32 +6,42 @@
 ; *** without express written permission from the author.         ***
 ; *******************************************************************
 
+.op "PUSH","N","9$1 73 8$1 73"
+.op "POP","N","60 72 A$1 F0 B$1"
+.op "CALL","W","D4 H1 L1"
+.op "RTN","","D5"
+.op "MOV","NR","9$2 B$1 8$2 A$1"
+.op "MOV","NW","F8 H2 B$1 F8 L2 A$1"
+
 include    ../bios.inc
 include    ../kernel.inc
 
-           org     8000h
-           lbr     0ff00h
-           db      'crc',0
-           dw      9000h
-           dw      endrom+7000h
-           dw      2000h
-           dw      endrom-2000h
-           dw      2000h
-           db      0
- 
            org     2000h
-           br      start
-
-include    date.inc
-include    build.inc
+begin:     br      start
+           eever
            db      'Written by Michael H. Riley',0
 
-start:
-           lda     ra                  ; move past any spaces
+start:     lda     ra                  ; move past any spaces
            smi     ' '
-           lbz     start
+           bz      start
            dec     ra                  ; move back to non-space character
-           ghi     ra                  ; copy argument address to rf
+           ldn     ra                  ; check for -
+           smi     '-'
+           bnz     start1              ; jump if not
+           inc     ra                  ; move past dash
+           lda     ra                  ; get following character
+           smi     'x'                 ; check for x
+           bnz     argerr              ; jump if not
+           mov     rf,padding
+           ldi     1                   ; signal xmodem padding
+           str     rf
+           br      start               ; move past any spaces
+argerr:    sep     scall               ; display error
+           dw      o_inmsg
+           db      'Invalid switch',10,13,0
+           ldi     09h
+           sep     sret                ; return to OS
+start1:    ghi     ra                  ; copy argument address to rf
            phi     rf
            glo     ra
            plo     rf
@@ -49,7 +59,8 @@ loop1:     lda     rf                  ; look for first less <= space
            lbnz    good                ; jump if filename given
            sep     scall               ; otherwise display usage message
            dw      o_inmsg
-           db      'Usage: crc filename',10,13,0
+           db      'Usage: crc [-x] filename',10,13,0
+           ldi     0ah
            sep     sret                ; and return to os
 
 good:      ldi     high fildes         ; get file descriptor
@@ -67,7 +78,8 @@ good:      ldi     high fildes         ; get file descriptor
            plo     rf
            sep     scall               ; display it
            dw      o_msg
-           lbr     o_wrmboot           ; and return to os
+           ldi     04
+           sep     sret                ; return to the OS
 opened:    ldi     0                   ; set initial crc
            plo     r7
            phi     r7
@@ -96,9 +108,23 @@ done:      sep     scall               ; close the file
            sep     scall               ; cr/lf
            dw      o_inmsg
            db      10,13,0
-           lbr     o_wrmboot           ; return to os
+           ldi     0
+           sep     sret
 
-success:   mov     rf,data             ; point to data
+success:   glo     rc                  ; get bytes read
+           smi     128                 ; were 128 bytes read
+           lbz     success2            ; jump if so
+           mov     r9,padding          ; need to see if need padding
+           ldn     r9
+           lbz     success2            ; jump if not
+padloop:   ldi     01ah                ; write padding byte
+           str     rf                  ; store in buffer
+           inc     rf
+           inc     rc
+           glo     rc
+           smi     128
+           lbnz    padloop             ; loop until 128 bytes padded
+success2:  mov     rf,data             ; point to data
            sep     scall               ; perform crc calculation
            dw      crc
            lbr     loop                ; loop back for more data
@@ -182,6 +208,7 @@ crc1:      ghi     r7                  ; shift crc value
            lbnz    crc1                ; loop until done
            sep     sret                ; return
 
+padding:   db      0
 filename:  db      0,0
 errmsg:    db      'File not found',10,13,0
 fildes:    db      0,0,0,0
@@ -194,9 +221,13 @@ fildes:    db      0,0,0,0
 
 endrom:    equ     $
 
+.suppress
+
 buffer:    ds      20
 cbuffer:   ds      80
 dta:       ds      512
 
 data:      ds      128
+
+           end     begin
 
